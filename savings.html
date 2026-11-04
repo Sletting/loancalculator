@@ -213,6 +213,13 @@ function monthlyRate(loan) {
   if (r <= 0) return 0;
   return loan.rateModel === "nominal-monthly" ? r / 12 : Math.pow(1 + r, 1 / 12) - 1;
 }
+// Renten for en brudt periode: fra udbetalingsdagen frem til første ydelse.
+function dayRate(loan, d) {
+  const r = loan.rate / 100;
+  if (r <= 0 || d <= 0) return 0;
+  return loan.rateModel === "nominal-monthly" ? r * d / 365 : Math.pow(1 + r, d / 365) - 1;
+}
+
 // Tilskrives kvartalsvis: ultimo marts, juni, september og december.
 const isQuarterEnd = iso => [2, 5, 8, 11].includes(parseDate(iso).m);
 
@@ -225,6 +232,8 @@ function runPlan(loan, payment, opts = {}) {
   const lumps = opts.lumps || {};
   const balloonAt = opts.balloonAt || 0;
   const limit = balloonAt || opts.limit || MAX_MONTHS;
+  // Er udbetalingsdagen kendt, dækker første ydelse kun dagene derfra.
+  const firstDays = loan.payout ? Math.max(0, days(loan.payout, edate(loan.first, 0))) : null;
 
   const rows = [];
   let balance = loan.balance, accrued = 0, stalled = false, settled = false;
@@ -237,7 +246,7 @@ function runPlan(loan, payment, opts = {}) {
       settled = true;
       break;
     }
-    const accrual = before * i;
+    const accrual = (m === 1 && firstDays !== null) ? before * dayRate(loan, firstDays) : before * i;
     const charge = quarterly ? (isQuarterEnd(date) ? accrued + accrual : 0) : accrual;
     const settle = before + accrued + accrual;                       // beløb til fuld indfrielse
     let pay, interest, principal;
@@ -245,7 +254,8 @@ function runPlan(loan, payment, opts = {}) {
       pay = settle; interest = accrued + accrual; principal = before; accrued = 0;
     } else {
       // Uden udligning giver en ydelse under renten et lån, der aldrig afvikles.
-      if (!balloonAt && payment <= accrual) { stalled = true; break; }
+      // Målt på den løbende månedsrente — en lang første periode er ikke i sig selv et stop.
+      if (!balloonAt && payment <= before * i) { stalled = true; break; }
       pay = payment; interest = charge; principal = pay - charge;
       accrued = quarterly && !isQuarterEnd(date) ? accrued + accrual : 0;
     }
@@ -262,7 +272,8 @@ function runPlan(loan, payment, opts = {}) {
 function paymentForTerm(loan) {
   const n = Math.max(loan.n, 1);
   const i = monthlyRate(loan);
-  if (loan.rateModel !== "aop-quarterly") return pmt(i, n, loan.balance);
+  // Annuitetsformlen gælder kun ved månedlig tilskrivning og hele perioder.
+  if (loan.rateModel !== "aop-quarterly" && !loan.payout) return pmt(i, n, loan.balance);
   let lo = 0, hi = loan.balance * (1 + i) ;
   for (let k = 0; k < 60; k++) {
     const mid = (lo + hi) / 2;
@@ -325,7 +336,7 @@ function aggregate(results, loans) {
 let seq = 0;
 const newLoan = () => ({
   id: ++seq, name: `Lån ${seq}`, balance: "", bankRate: "", rate: "",
-  bankPayment: "", rateModel: "aop-quarterly",
+  bankPayment: "", rateModel: "aop-quarterly", payout: "",
   first: "", last: "", lengthMode: "dates", years: "", monthsPart: "",
   extra: "", lumps: []
 });
@@ -337,7 +348,7 @@ function prepared() {
     id: l.id, name: l.name || `Lån ${l.id}`,
     balance: val(l, "balance"), rate: val(l, "rate"), bankPayment: val(l, "bankPayment"),
     rateModel: l.rateModel,
-    first: l.first, lastExpected: l.last, extra: val(l, "extra"),
+    first: l.first, lastExpected: l.last, payout: l.payout, extra: val(l, "extra"),
     lumps: l.lumps.map(x => ({ month: x.month, amount: parseNum(x.amount) })),
     n: (l.first && l.last) ? monthsBetween(l.first, l.last) : 0
   })).filter(l => l.balance > 0 && l.n >= 1 && (l.rate > 0 || l.bankPayment > 0));
@@ -391,6 +402,15 @@ function writeLength(l) {
     const n = (l.first && l.last) ? monthsBetween(l.first, l.last) : 0;
     out.textContent = n > 0 ? n : "–";
   }
+  const period = document.getElementById(`p-${l.id}`);
+  if (period) period.textContent = firstPeriodText(l);
+}
+
+// Længden af den brudte første renteperiode, til visning under kortet.
+function firstPeriodText(l) {
+  if (!l.payout || !l.first) return "";
+  const d = Math.max(0, days(l.payout, l.first));
+  return ` · første renteperiode: ${fmt(d, 0, 0)} dage`;
 }
 
 function loanCard(l) {
@@ -425,6 +445,7 @@ function loanCard(l) {
   // Løbetiden på egen linje: enten datoer eller år + måneder — den anden side vises afledt.
   const lengthRow = `
       <div class="dates">
+        ${dateField("payout", "Udbetalt den", false)}
         <div>
           <label for="lengthMode-${l.id}">Løbetid angives som</label>
           <select id="lengthMode-${l.id}" data-id="${l.id}" data-field="lengthMode">
@@ -447,7 +468,7 @@ function loanCard(l) {
       </div>
       <div class="grid">${fields}</div>
       <p class="derived">Antal resterende ydelser:
-        <strong id="n-${l.id}">${n > 0 ? n : "–"}</strong></p>
+        <strong id="n-${l.id}">${n > 0 ? n : "–"}</strong><span id="p-${l.id}">${firstPeriodText(l)}</span></p>
     </div>`;
 }
 
@@ -612,7 +633,7 @@ document.addEventListener("input", ev => {
   if (t.dataset.lump !== undefined) loan.lumps[+t.dataset.lump][field] = t.value;
   else loan[field] = t.value;
 
-  if (["first", "last", "years", "monthsPart"].includes(field)) {
+  if (["first", "last", "years", "monthsPart", "payout"].includes(field)) {
     syncLength(loan);
     writeLength(loan);
   }
@@ -675,6 +696,7 @@ elId("save").addEventListener("click", () => {
       bankPayment: parseNum(l.bankPayment),
       rateModel: l.rateModel,
       lengthMode: l.lengthMode,
+      payoutDate: l.payout || null,
       firstPayment: l.first || null, expectedLastPayment: l.last || null,
       termYears: Math.round(parseNum(l.years)),
       termMonths: Math.round(parseNum(l.monthsPart)),
@@ -730,6 +752,7 @@ elId("loadFile").addEventListener("change", ev => {
         loan.bankPayment = l.bankPayment ? fmt(l.bankPayment) : "";
         loan.rateModel = RATE_MODELS.some(m => m[0] === l.rateModel) ? l.rateModel : "aop-quarterly";
         loan.lengthMode = l.lengthMode === "span" ? "span" : "dates";
+        loan.payout = l.payoutDate || "";
         loan.first = l.firstPayment || "";
         loan.last = l.expectedLastPayment || "";
         loan.years = l.termYears ? String(l.termYears) : "";
