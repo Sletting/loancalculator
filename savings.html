@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interest Savings</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --panel: #fff; --ink: #1b1f24; --muted: #5b6672;
+    --brand: #00617f; --line: #dde3ea; --head: #d9dff0; --zebra: #fafbfc;
+    --good: #1d7a4c; --goodbg: #e8f5ee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1rem 4rem;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink);
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 2.25rem; font-weight: 600; margin: 0 0 .35rem; }
+  .sub { color: var(--muted); font-size: .9rem; margin: 0 0 1.5rem; }
+  .sub a { color: var(--brand); }
+  h2 { font-size: 1rem; font-weight: 600; color: var(--brand); margin: 0 0 1rem; }
+  h3 { font-size: .9rem; font-weight: 600; margin: 0 0 .75rem; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 1.25rem 1.25rem 1.4rem; margin-bottom: 1.5rem;
+  }
+  .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+  .panel-head h2 { margin-bottom: 1rem; }
+  .actions { display: flex; gap: .5rem; }
+  button {
+    font: inherit; font-size: .9rem; font-weight: 600;
+    padding: .4rem .9rem; border-radius: 4px; cursor: pointer;
+    border: 1px solid var(--brand); background: #fff; color: var(--brand);
+  }
+  button:hover { background: var(--brand); color: #fff; }
+  button.ghost { border-color: var(--line); color: var(--muted); font-weight: 500; padding: .25rem .6rem; }
+  button.ghost:hover { background: #f0f3f7; color: var(--ink); }
+  #loadFile { display: none; }
+  .card {
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 1rem; margin-bottom: 1rem; background: var(--zebra);
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .9rem; }
+  .card-head input { font-weight: 600; max-width: 18rem; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 1rem 1.5rem; align-items: stretch;
+  }
+  .grid > div { display: flex; flex-direction: column; }
+  .grid > div > input, .grid > div > select { margin-top: auto; }
+  /* Datofelterne: egen linje under de øvrige, men side om side og i samme bredde. */
+  .grid > .dates { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; gap: 1rem 1.5rem; }
+  .dates > div { flex: 0 1 190px; display: flex; flex-direction: column; }
+  .dates > div.small { flex: 0 1 110px; }
+  .dates > div > input, .dates > div > select { margin-top: auto; }
+  input[readonly] { background: #eef1f4; color: var(--muted); border-color: var(--line); }
+  label { display: block; font-size: .8rem; font-weight: 600; color: var(--brand); margin-bottom: .35rem; }
+  input, select {
+    width: 100%; padding: .5rem .6rem; font: inherit; font-weight: 600;
+    border: 1px solid #b9c2cc; border-radius: 4px; background: #fff; color: var(--ink);
+  }
+  input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .derived { font-size: .8rem; color: var(--muted); margin-top: .75rem; }
+  .lump-row { display: flex; gap: .6rem; align-items: flex-end; margin-bottom: .6rem; }
+  .lump-row > div { flex: 1; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: .9rem; }
+  th, td { padding: .45rem .7rem; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { background: var(--head); font-weight: 700; }
+  tbody tr:nth-child(even) { background: var(--zebra); }
+  tr.strong td { font-weight: 700; }
+  td.gain { color: var(--good); font-weight: 600; }
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+  .save-box {
+    background: var(--goodbg); border: 1px solid #bfe3cf; border-radius: 10px;
+    padding: 1.25rem; display: grid; gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .save-box .k { font-size: .85rem; font-weight: 600; color: var(--good); }
+  .save-box .v { font-size: 1.6rem; font-weight: 700; margin-top: .2rem; }
+  details { margin-top: .9rem; }
+  summary { cursor: pointer; font-size: .85rem; color: var(--brand); font-weight: 600; }
+  .plan { max-height: 340px; overflow: auto; margin-top: .6rem; }
+  .plan thead th { position: sticky; top: 0; }
+  .note { font-size: .82rem; color: var(--muted); margin: .9rem 0 0; }
+  .warn { color: #a3401a; font-size: .85rem; font-weight: 600; margin-top: .6rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Interest Savings</h1>
+  <p class="sub">
+    Ydelse, renter og tid til afvikling for et eller flere lån &mdash; og hvad ekstra
+    indbetalinger sparer. Annuitetslån; renten løber månedligt og tilskrives efter den
+    rentemodel, der er valgt på det enkelte lån.
+    &nbsp;<a href="index.html">&larr; Loan Calculator</a>
+  </p>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>1. Låneoplysninger fra banken</h2>
+      <div class="actions">
+        <button type="button" id="addLoan">Tilføj lån</button>
+        <button type="button" id="save">Save</button>
+        <button type="button" id="load">Load</button>
+        <input type="file" id="loadFile" accept="application/json,.json">
+      </div>
+    </div>
+    <div id="loans"></div>
+  </section>
+
+  <section class="panel">
+    <h2>2. Scenarie &mdash; ekstra indbetalinger</h2>
+    <div class="grid" style="margin-bottom:1rem">
+      <div>
+        <label for="termMode">Håndtering af løbetid</label>
+        <select id="termMode">
+          <option value="fixed-term">Løbetid fast &ndash; ydelsen beregnes af renten</option>
+          <option value="fixed-payment">Ydelse fast &ndash; løbetiden tilpasses</option>
+          <option value="fixed-term-balloon">Løbetid fast &ndash; udligning ved sidste ydelse</option>
+        </select>
+      </div>
+    </div>
+    <div id="scenarios"></div>
+  </section>
+
+  <section class="panel">
+    <h2>3. Hovedtal &mdash; samlet for alle lån</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>&nbsp;</th><th>Uden ekstra</th><th>Med ekstra</th><th>Forskel (med &minus; uden)</th></tr>
+        </thead>
+        <tbody id="totals"></tbody>
+      </table>
+    </div>
+    <p class="note" id="totalsNote"></p>
+  </section>
+
+  <section class="panel">
+    <h2>Hovedtal pr. lån</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Lån</th><th>Ydelse uden</th><th>Ydelse med</th>
+            <th>Total rente uden</th><th>Total rente med</th>
+            <th>Sidste ydelse uden</th><th>Sidste ydelse med</th>
+            <th>Sparet i renter</th><th>Færdig tidligere</th>
+          </tr>
+        </thead>
+        <tbody id="perLoan"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="save-box" id="savings"></section>
+</div>
+
+<script>
+// ---- Tal og kultur -------------------------------------------------------
+const LOCALE = new URLSearchParams(location.search).get("locale")
+  || (navigator.languages || [navigator.language]).find(l => l && /^da\b|^da-/i.test(l))
+  || "da-DK";
+const kr = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const parts = new Intl.NumberFormat(LOCALE).formatToParts(1234567.8);
+const GROUP = (parts.find(p => p.type === "group") || { value: "" }).value;
+const DECIMAL = (parts.find(p => p.type === "decimal") || { value: "." }).value;
+const fmt = (n, min = 2, max = 2) =>
+  Number.isFinite(n) ? n.toLocaleString(LOCALE, { minimumFractionDigits: min, maximumFractionDigits: max }) : "–";
+const money = n => fmt(n) + " kr.";
+
+function parseNum(raw) {
+  const s = String(raw == null ? "" : raw).replace(/\s| /g, "");
+  if (!s) return 0;
+  const cut = Math.max(s.lastIndexOf("."), s.lastIndexOf(","));
+  if (cut === -1) return Number(s.replace(/[^\d-]/g, "")) || 0;
+  const tail = s.slice(cut + 1);
+  if (tail.length === 3 && s[cut] === GROUP && s.indexOf(s[cut]) === s.lastIndexOf(s[cut])
+      && s.indexOf(DECIMAL) === -1) return Number(s.replace(/[^\d-]/g, "")) || 0;
+  const whole = s.slice(0, cut).replace(/[^\d-]/g, "");
+  return Number(`${whole || "0"}.${tail.replace(/\D/g, "")}`) || 0;
+}
+
+// ---- Datoer --------------------------------------------------------------
+const pad = n => String(n).padStart(2, "0");
+const daysIn = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+const parseDate = s => { const [y, m, d] = String(s).split("-").map(Number); return { y, m: m - 1, d: d || 1 }; };
+// Samme dag i måneden, afkortet til månedens længde — som regnearkets EDATE.
+function edate(iso, k) {
+  const o = parseDate(iso), t = o.m + k;
+  const y = o.y + Math.floor(t / 12), m = ((t % 12) + 12) % 12;
+  return `${y}-${pad(m + 1)}-${pad(Math.min(o.d, daysIn(y, m)))}`;
+}
+const monthsBetween = (a, b) => {
+  const A = parseDate(a), B = parseDate(b);
+  return (B.y - A.y) * 12 + (B.m - A.m) + 1;
+};
+const dk = iso => { const o = parseDate(iso); return `${pad(o.d)}.${pad(o.m + 1)}.${o.y}`; };
+const days = (a, b) => (Date.parse(b) - Date.parse(a)) / 86400000;
+const thisMonth = () => { const n = new Date(); return `${n.getFullYear()}-${pad(n.getMonth() + 1)}`; };
+
+// ---- Model ---------------------------------------------------------------
+const MAX_MONTHS = 1200;
+const pmt = (i, n, pv) => i === 0 ? pv / n : pv * i / (1 - Math.pow(1 + i, -n));
+
+// Renten kan være oplyst som ÅOP (effektiv) eller som nominel rente.
+// Månedsrenten er den, der over 12 måneder giver netop den oplyste ÅOP.
+function monthlyRate(loan) {
+  const r = loan.rate / 100;
+  if (r <= 0) return 0;
+  return loan.rateModel === "nominal-monthly" ? r / 12 : Math.pow(1 + r, 1 / 12) - 1;
+}
+// Tilskrives kvartalsvis: ultimo marts, juni, september og december.
+const isQuarterEnd = iso => [2, 5, 8, 11].includes(parseDate(iso).m);
+
+// Kernen: afvikling måned for måned ved en given ydelse.
+// Renten løber hver måned, men debiteres først ved tilskrivningen; indtil da
+// afdrager hele ydelsen på gælden, og de påløbne renter venter i "accrued".
+function runPlan(loan, payment, opts = {}) {
+  const i = monthlyRate(loan);
+  const quarterly = loan.rateModel === "aop-quarterly";
+  const lumps = opts.lumps || {};
+  const balloonAt = opts.balloonAt || 0;
+  const limit = balloonAt || opts.limit || MAX_MONTHS;
+
+  const rows = [];
+  let balance = loan.balance, accrued = 0, stalled = false, settled = false;
+  for (let m = 1; m <= limit; m++) {
+    const lump = Math.min(lumps[m] || 0, balance);
+    const before = balance - lump;
+    const date = edate(loan.first, m - 1);
+    if (before <= 0.01 && accrued <= 0.01) {
+      if (lump) rows.push({ m, date, lump, before: 0, payment: 0, interest: 0, principal: 0, after: 0 });
+      settled = true;
+      break;
+    }
+    const accrual = before * i;
+    const charge = quarterly ? (isQuarterEnd(date) ? accrued + accrual : 0) : accrual;
+    const settle = before + accrued + accrual;                       // beløb til fuld indfrielse
+    let pay, interest, principal;
+    if (settle <= payment + 0.01 || (balloonAt && m === balloonAt)) {
+      pay = settle; interest = accrued + accrual; principal = before; accrued = 0;
+    } else {
+      // Uden udligning giver en ydelse under renten et lån, der aldrig afvikles.
+      if (!balloonAt && payment <= accrual) { stalled = true; break; }
+      pay = payment; interest = charge; principal = pay - charge;
+      accrued = quarterly && !isQuarterEnd(date) ? accrued + accrual : 0;
+    }
+    const after = (before - principal <= 0.01) ? 0 : before - principal;
+    rows.push({ m, date, lump, before, payment: pay, interest, principal, after });
+    balance = after;
+    if (balance === 0 && accrued <= 0.01) { settled = true; break; }
+  }
+  return { rows, stalled, settled };
+}
+
+// Ydelsen der afvikler lånet på præcis n måneder. Ved månedlig tilskrivning er
+// det annuitetsformlen; ved kvartalsvis findes den ved indkredsning.
+function paymentForTerm(loan) {
+  const n = Math.max(loan.n, 1);
+  const i = monthlyRate(loan);
+  if (loan.rateModel !== "aop-quarterly") return pmt(i, n, loan.balance);
+  let lo = 0, hi = loan.balance * (1 + i) ;
+  for (let k = 0; k < 60; k++) {
+    const mid = (lo + hi) / 2;
+    // Ydelsen er stor nok, når lånet — inkl. de sidste påløbne renter — er ude af
+    // verden inden for de n måneder. En stoppet plan er for lidt, ikke for meget.
+    const { settled, stalled } = runPlan(loan, mid, { limit: n });
+    if (settled && !stalled) hi = mid; else lo = mid;
+  }
+  return hi;
+}
+
+function simulate(loan, withExtra) {
+  const n = Math.max(loan.n, 1);
+  // "balloon": bankens ydelse betales løbetiden ud, og sidste ydelse udligner resten.
+  const balloon = state.termMode === "fixed-term-balloon";
+  const regular = (balloon || state.termMode === "fixed-payment")
+    ? loan.bankPayment : paymentForTerm(loan);
+  const extra = withExtra ? loan.extra : 0;
+  const payment = regular + extra;
+
+  const lumps = {};
+  if (withExtra) {
+    loan.lumps.forEach(l => {
+      if (!l.amount || !loan.first) return;
+      const m = Math.max(1, monthsBetween(loan.first.slice(0, 7), l.month || loan.first.slice(0, 7)));
+      lumps[m] = (lumps[m] || 0) + l.amount;
+    });
+  }
+
+  const { rows, stalled } = runPlan(loan, payment, { lumps, balloonAt: balloon ? n : 0 });
+  const paying = rows.filter(r => r.payment > 0);
+  return {
+    rows, regular, payment, stalled,
+    totalInterest: rows.reduce((t, r) => t + r.interest, 0),
+    totalLump: rows.reduce((t, r) => t + r.lump, 0),
+    firstInterest: rows.length ? rows[0].interest : 0,
+    yearOne: rows.slice(0, 12).reduce((t, r) => t + r.interest, 0),
+    last: paying.length ? paying[paying.length - 1].date : null,
+    lastPayment: paying.length ? paying[paying.length - 1].payment : 0,
+    count: paying.length
+  };
+}
+
+function aggregate(results, loans) {
+  const sum = f => results.reduce((t, r) => t + f(r), 0);
+  const lastDates = results.map(r => r.last).filter(Boolean);
+  return {
+    payment: sum(r => r.payment),
+    firstInterest: sum(r => r.firstInterest),
+    yearOne: sum(r => r.yearOne),
+    totalInterest: sum(r => r.totalInterest),
+    principal: loans.reduce((t, l) => t + l.balance, 0),
+    count: sum(r => r.count),
+    lastPayment: sum(r => r.lastPayment),
+    last: lastDates.length ? lastDates.reduce((a, b) => a > b ? a : b) : null
+  };
+}
+
+// ---- Tilstand ------------------------------------------------------------
+let seq = 0;
+const newLoan = () => ({
+  id: ++seq, name: `Lån ${seq}`, balance: "", bankRate: "", rate: "",
+  bankPayment: "", rateModel: "aop-quarterly",
+  first: "", last: "", lengthMode: "dates", years: "", monthsPart: "",
+  extra: "", lumps: []
+});
+let state = { termMode: "fixed-term", loans: [newLoan()] };
+
+const val = (loan, f) => parseNum(loan[f]);
+function prepared() {
+  return state.loans.map(l => ({
+    id: l.id, name: l.name || `Lån ${l.id}`,
+    balance: val(l, "balance"), rate: val(l, "rate"), bankPayment: val(l, "bankPayment"),
+    rateModel: l.rateModel,
+    first: l.first, lastExpected: l.last, extra: val(l, "extra"),
+    lumps: l.lumps.map(x => ({ month: x.month, amount: parseNum(x.amount) })),
+    n: (l.first && l.last) ? monthsBetween(l.first, l.last) : 0
+  })).filter(l => l.balance > 0 && l.n >= 1 && (l.rate > 0 || l.bankPayment > 0));
+}
+
+// ---- Felter --------------------------------------------------------------
+const FIELDS = [
+  ["balance", "Restgæld (DKK)", "num"],
+  ["bankRate", "Rente ifølge banken (%)", "num"],
+  ["rate", "ÅOP / rente i modellen (%)", "num"],
+  ["rateModel", "Rentemodel", "select"],
+  ["bankPayment", "Ydelse ifølge banken (DKK/md)", "num"]
+];
+
+const RATE_MODELS = [
+  ["aop-quarterly", "ÅOP – tilskrives kvartalsvis"],
+  ["aop-monthly", "ÅOP – tilskrives månedligt"],
+  ["nominal-monthly", "Nominel rente ÷ 12"]
+];
+
+// Løbetiden kan angives enten med datoer eller som år + måneder.
+// I begge tilfælde ligger ydelsesdatoerne sidst i måneden.
+const lastDayOfMonth = iso => {
+  const o = parseDate(iso);
+  return `${o.y}-${pad(o.m + 1)}-${pad(daysIn(o.y, o.m))}`;
+};
+const monthEndToday = () => {
+  const n = new Date();
+  return lastDayOfMonth(`${n.getFullYear()}-${pad(n.getMonth() + 1)}-01`);
+};
+const spanMonths = l => Math.max(0, Math.round(parseNum(l.years))) * 12
+                      + Math.max(0, Math.round(parseNum(l.monthsPart)));
+
+function syncLength(l) {
+  if (l.lengthMode === "span") {
+    l.first = lastDayOfMonth(l.first || monthEndToday());
+    const total = spanMonths(l);
+    l.last = total >= 1 ? lastDayOfMonth(edate(l.first, total - 1)) : "";
+  } else if (l.first && l.last) {
+    const n = monthsBetween(l.first, l.last);
+    if (n >= 1) { l.years = String(Math.floor(n / 12)); l.monthsPart = String(n % 12); }
+  }
+}
+
+// Skriver de afledte værdier tilbage i felterne uden at gentegne kortet.
+function writeLength(l) {
+  [["first", l.first], ["last", l.last], ["years", l.years], ["monthsPart", l.monthsPart]]
+    .forEach(([f, v]) => { const e = document.getElementById(`${f}-${l.id}`); if (e) e.value = v; });
+  const out = document.getElementById(`n-${l.id}`);
+  if (out) {
+    const n = (l.first && l.last) ? monthsBetween(l.first, l.last) : 0;
+    out.textContent = n > 0 ? n : "–";
+  }
+}
+
+function loanCard(l) {
+  const field = ([f, label, type]) => type === "select" ? `
+      <div>
+        <label for="${f}-${l.id}">${label}</label>
+        <select id="${f}-${l.id}" data-id="${l.id}" data-field="${f}">
+          ${RATE_MODELS.map(([v, text]) =>
+            `<option value="${v}"${l[f] === v ? " selected" : ""}>${text}</option>`).join("")}
+        </select>
+      </div>` : `
+      <div>
+        <label for="${f}-${l.id}">${label}</label>
+        <input id="${f}-${l.id}" data-id="${l.id}" data-field="${f}"
+               type="${type === "date" ? "date" : "text"}"
+               ${type === "date" ? "" : 'inputmode="decimal" autocomplete="off"'}
+               value="${esc(l[f])}">
+      </div>`;
+  const span = l.lengthMode === "span";
+  const dateField = (f, label, ro) => `
+        <div>
+          <label for="${f}-${l.id}">${label}</label>
+          <input id="${f}-${l.id}" data-id="${l.id}" data-field="${f}" type="date"
+                 value="${esc(l[f])}" ${ro ? "readonly" : ""}>
+        </div>`;
+  const numField = (f, label, ro) => `
+        <div class="small">
+          <label for="${f}-${l.id}">${label}</label>
+          <input id="${f}-${l.id}" data-id="${l.id}" data-field="${f}" type="text"
+                 inputmode="numeric" autocomplete="off" value="${esc(l[f])}" ${ro ? "readonly" : ""}>
+        </div>`;
+  // Løbetiden på egen linje: enten datoer eller år + måneder — den anden side vises afledt.
+  const lengthRow = `
+      <div class="dates">
+        <div>
+          <label for="lengthMode-${l.id}">Løbetid angives som</label>
+          <select id="lengthMode-${l.id}" data-id="${l.id}" data-field="lengthMode">
+            <option value="dates"${span ? "" : " selected"}>Datoer</option>
+            <option value="span"${span ? " selected" : ""}>År og måneder</option>
+          </select>
+        </div>
+        ${dateField("first", "Næste ydelse", false)}
+        ${dateField("last", "Forventet sidste betaling", span)}
+        ${numField("years", "År", !span)}
+        ${numField("monthsPart", "Måneder", !span)}
+      </div>`;
+  const fields = FIELDS.map(field).join("") + lengthRow;
+  const n = (l.first && l.last) ? monthsBetween(l.first, l.last) : 0;
+  return `
+    <div class="card">
+      <div class="card-head">
+        <input data-id="${l.id}" data-field="name" value="${esc(l.name)}" aria-label="Navn på lån">
+        <button type="button" class="ghost" data-remove="${l.id}">Fjern lån</button>
+      </div>
+      <div class="grid">${fields}</div>
+      <p class="derived">Antal resterende ydelser:
+        <strong id="n-${l.id}">${n > 0 ? n : "–"}</strong></p>
+    </div>`;
+}
+
+function scenarioCard(l) {
+  const lumps = l.lumps.map((x, k) => `
+      <div class="lump-row">
+        <div>
+          <label for="lm-${l.id}-${k}">Måned</label>
+          <input id="lm-${l.id}-${k}" type="month" data-id="${l.id}" data-lump="${k}" data-field="month" value="${esc(x.month)}">
+        </div>
+        <div>
+          <label for="la-${l.id}-${k}">Beløb (DKK)</label>
+          <input id="la-${l.id}-${k}" type="text" inputmode="decimal" autocomplete="off"
+                 data-id="${l.id}" data-lump="${k}" data-field="amount" value="${esc(x.amount)}">
+        </div>
+        <button type="button" class="ghost" data-dellump="${l.id}" data-k="${k}">Fjern</button>
+      </div>`).join("");
+  return `
+    <div class="card">
+      <h3>${esc(l.name || "Lån " + l.id)}</h3>
+      <div class="grid">
+        <div>
+          <label for="extra-${l.id}">Ekstra ydelse pr. måned (DKK)</label>
+          <input id="extra-${l.id}" type="text" inputmode="decimal" autocomplete="off"
+                 data-id="${l.id}" data-field="extra" value="${esc(l.extra)}">
+        </div>
+      </div>
+      <div style="margin-top:1rem">
+        <label>Engangsindbetalinger</label>
+        ${lumps || '<p class="derived" style="margin:0 0 .6rem">Ingen endnu.</p>'}
+        <button type="button" class="ghost" data-addlump="${l.id}">Tilføj engangsindbetaling</button>
+      </div>
+    </div>`;
+}
+
+const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+const elId = id => document.getElementById(id);
+function renderInputs() {
+  elId("loans").innerHTML = state.loans.map(loanCard).join("");
+  elId("scenarios").innerHTML = state.loans.map(scenarioCard).join("");
+}
+
+// ---- Resultat ------------------------------------------------------------
+function calc() {
+  const loans = prepared();
+  const tb = elId("totals"), pl = elId("perLoan"), sv = elId("savings");
+  if (!loans.length) {
+    tb.innerHTML = `<tr><td colspan="4">Udfyld restgæld, rente og datoer for mindst ét lån.</td></tr>`;
+    pl.innerHTML = "";
+    sv.innerHTML = "";
+    elId("totalsNote").textContent = "";
+    return;
+  }
+
+  const without = loans.map(l => simulate(l, false));
+  const with_ = loans.map(l => simulate(l, true));
+  const A = aggregate(without, loans), B = aggregate(with_, loans);
+  const anchor = loans.map(l => l.first).sort()[0];
+  const years = last => last ? days(edate(anchor, 0), last) / 365.25 : 0;
+  const stalled = with_.some(r => r.stalled) || without.some(r => r.stalled);
+
+  const row = (label, a, b, d, strong) => `
+    <tr class="${strong ? "strong" : ""}">
+      <td>${label}</td><td>${a}</td><td>${b}</td>
+      <td class="${d && d.gain ? "gain" : ""}">${d ? d.text : ""}</td>
+    </tr>`;
+  const diff = (a, b, f = money, better = "less") => {
+    const d = b - a;
+    return { text: (d > 0 ? "+" : "") + f(d), gain: better === "less" ? d < -0.005 : d > 0.005 };
+  };
+
+  tb.innerHTML = [
+    row("Månedlig ydelse (DKK pr. md)", money(A.payment), money(B.payment), diff(A.payment, B.payment, money, "more")),
+    row("Rente i første ydelse (DKK)", money(A.firstInterest), money(B.firstInterest), diff(A.firstInterest, B.firstInterest)),
+    row("Rente i første år (DKK)", money(A.yearOne), money(B.yearOne), diff(A.yearOne, B.yearOne)),
+    row("TOTAL RENTE I HELE LÅNET (DKK)", money(A.totalInterest), money(B.totalInterest),
+        diff(A.totalInterest, B.totalInterest), true),
+    row("Afdrag / hovedstol (DKK)", money(A.principal), money(B.principal), diff(A.principal, B.principal, money, "more")),
+    row("I ALT BETALT (DKK)", money(A.totalInterest + A.principal), money(B.totalInterest + B.principal),
+        diff(A.totalInterest + A.principal, B.totalInterest + B.principal), true),
+    row("Sidste ydelse (dato)", A.last ? dk(A.last) : "–", B.last ? dk(B.last) : "–",
+        { text: A.last && B.last ? fmt(days(B.last, A.last) / 365.25, 1, 1) + " år tidligere" : "", gain: true }),
+    row("Sidste ydelse (beløb)", money(A.lastPayment), money(B.lastPayment),
+        diff(A.lastPayment, B.lastPayment)),
+    row("Antal ydelser (antal)", fmt(A.count, 0, 0), fmt(B.count, 0, 0), diff(A.count, B.count, n => fmt(n, 0, 0))),
+    row("Løbetid tilbage (år)", fmt(years(A.last), 1, 1), fmt(years(B.last), 1, 1),
+        diff(years(A.last), years(B.last), n => fmt(n, 1, 1)))
+  ].join("");
+
+  const lumpTotal = with_.reduce((t, r) => t + r.totalLump, 0);
+  elId("totalsNote").textContent =
+    "Hovedstolen er den samme i begge scenarier — ekstra indbetalinger flytter kun tidspunktet. " +
+    "«I alt betalt» er renter + hovedstol, inkl. engangsindbetalinger" +
+    (lumpTotal ? ` (heraf ${money(lumpTotal)} som engangsindbetalinger).` : ".");
+
+  pl.innerHTML = loans.map((l, k) => {
+    const a = without[k], b = with_[k];
+    const saved = a.totalInterest - b.totalInterest;
+    const earlier = a.last && b.last ? days(b.last, a.last) / 365.25 : 0;
+    return `
+      <tr>
+        <td>${esc(l.name)}</td>
+        <td>${money(a.payment)}</td><td>${money(b.payment)}</td>
+        <td>${money(a.totalInterest)}</td><td>${money(b.totalInterest)}</td>
+        <td>${a.last ? dk(a.last) : "–"}</td><td>${b.last ? dk(b.last) : "–"}</td>
+        <td class="${saved > 0.005 ? "gain" : ""}">${money(saved)}</td>
+        <td class="${earlier > 0.005 ? "gain" : ""}">${fmt(earlier, 1, 1)} år</td>
+      </tr>
+      <tr><td colspan="9">
+        <details>
+          <summary>Vis betalingsplan for ${esc(l.name)} (med ekstra)</summary>
+          <div class="plan scroll">
+            <table>
+              <thead><tr><th>Måned</th><th>Dato</th><th>Engangs</th><th>Gæld før</th>
+                <th>Ydelse</th><th>Rente</th><th>Afdrag</th><th>Gæld efter</th></tr></thead>
+              <tbody>${b.rows.map(r => `<tr>
+                <td>${r.m}</td><td>${dk(r.date)}</td><td>${r.lump ? money(r.lump) : ""}</td>
+                <td>${money(r.before)}</td><td>${money(r.payment)}</td>
+                <td>${money(r.interest)}</td><td>${money(r.principal)}</td><td>${money(r.after)}</td>
+              </tr>`).join("")}</tbody>
+            </table>
+          </div>
+        </details>
+      </td></tr>`;
+  }).join("");
+
+  const savedInterest = A.totalInterest - B.totalInterest;
+  const earlierYears = A.last && B.last ? days(B.last, A.last) / 365.25 : 0;
+  sv.innerHTML = [
+    ["&gt;&gt;&gt; I ALT SPARET I RENTER", money(savedInterest)],
+    ["&gt;&gt;&gt; FÆRDIGT TIDLIGERE", fmt(earlierYears, 1, 1) + " år"],
+    ["&gt;&gt;&gt; SPAREDE YDELSER", fmt(A.count - B.count, 0, 0) + " måneder"]
+  ].map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")
+    + (stalled ? `<div class="warn">Mindst ét lån afvikles ikke: ydelsen dækker ikke renten.</div>` : "");
+}
+
+// ---- Hændelser -----------------------------------------------------------
+const findLoan = id => state.loans.find(l => l.id === +id);
+
+document.addEventListener("input", ev => {
+  const t = ev.target;
+  if (t.id === "termMode") { state.termMode = t.value; calc(); return; }
+  const id = t.dataset.id;
+  if (!id) return;
+  const loan = findLoan(id);
+  if (!loan) return;
+  const field = t.dataset.field;
+
+  // Skift mellem dato- og løbetidsstyring: behold den løbetid, der allerede står.
+  if (field === "lengthMode") {
+    loan.lengthMode = t.value;
+    if (t.value === "span" && loan.first && loan.last) {
+      const n = monthsBetween(loan.first, loan.last);
+      if (n >= 1) { loan.years = String(Math.floor(n / 12)); loan.monthsPart = String(n % 12); }
+    }
+    syncLength(loan);
+    renderInputs();
+    calc();
+    return;
+  }
+
+  if (t.dataset.lump !== undefined) loan.lumps[+t.dataset.lump][field] = t.value;
+  else loan[field] = t.value;
+
+  if (["first", "last", "years", "monthsPart"].includes(field)) {
+    syncLength(loan);
+    writeLength(loan);
+  }
+  if (t.dataset.field === "name") {
+    const h = elId("scenarios").querySelectorAll("h3")[state.loans.indexOf(loan)];
+    if (h) h.textContent = t.value || `Lån ${loan.id}`;
+  }
+  calc();
+});
+
+// Pæn opstilling af tal, når feltet forlades.
+document.addEventListener("focusout", ev => {
+  const t = ev.target;
+  if (!t.dataset || !t.dataset.id || t.type === "date" || t.type === "month") return;
+  const f = t.dataset.field;
+  if (["name", "lengthMode", "rateModel"].includes(f) || !t.value.trim()) return;
+  const decimals = (f === "rate" || f === "bankRate") ? [1, 4]
+                 : (f === "years" || f === "monthsPart") ? [0, 0] : [2, 2];
+  t.value = fmt(parseNum(t.value), decimals[0], decimals[1]);
+  const loan = findLoan(t.dataset.id);
+  if (!loan) return;
+  if (t.dataset.lump !== undefined) loan.lumps[+t.dataset.lump][f] = t.value; else loan[f] = t.value;
+});
+
+document.addEventListener("click", ev => {
+  const t = ev.target;
+  if (t.id === "addLoan") { state.loans.push(newLoan()); renderInputs(); calc(); return; }
+  if (t.dataset.remove) {
+    state.loans = state.loans.filter(l => l.id !== +t.dataset.remove);
+    if (!state.loans.length) state.loans.push(newLoan());
+    renderInputs(); calc(); return;
+  }
+  if (t.dataset.addlump) {
+    const loan = findLoan(t.dataset.addlump);
+    loan.lumps.push({ month: loan.first ? loan.first.slice(0, 7) : thisMonth(), amount: "" });
+    renderInputs(); calc(); return;
+  }
+  if (t.dataset.dellump) {
+    const loan = findLoan(t.dataset.dellump);
+    loan.lumps.splice(+t.dataset.k, 1);
+    renderInputs(); calc();
+  }
+});
+
+// ---- Gem og indlæs -------------------------------------------------------
+elId("save").addEventListener("click", () => {
+  const loans = prepared();
+  const without = loans.map(l => simulate(l, false));
+  const with_ = loans.map(l => simulate(l, true));
+  const A = aggregate(without, loans), B = aggregate(with_, loans);
+  const data = {
+    format: "interest-savings",
+    version: 1,
+    saved: new Date().toISOString(),
+    termMode: state.termMode,
+    // Kulturuafhængigt: tal som tal, datoer på ISO-form.
+    loans: state.loans.map(l => ({
+      name: l.name,
+      balance: parseNum(l.balance), bankRate: parseNum(l.bankRate), rate: parseNum(l.rate),
+      bankPayment: parseNum(l.bankPayment),
+      rateModel: l.rateModel,
+      lengthMode: l.lengthMode,
+      firstPayment: l.first || null, expectedLastPayment: l.last || null,
+      termYears: Math.round(parseNum(l.years)),
+      termMonths: Math.round(parseNum(l.monthsPart)),
+      extraPerMonth: parseNum(l.extra),
+      oneOffPayments: l.lumps.map(x => ({ month: x.month || null, amount: parseNum(x.amount) }))
+    })),
+    result: {
+      without: { monthlyPayment: A.payment, totalInterest: A.totalInterest,
+                 totalPaid: A.totalInterest + A.principal,
+                 lastPaymentDate: A.last, lastPaymentAmount: A.lastPayment, payments: A.count },
+      with: { monthlyPayment: B.payment, totalInterest: B.totalInterest,
+              totalPaid: B.totalInterest + B.principal,
+              lastPaymentDate: B.last, lastPaymentAmount: B.lastPayment, payments: B.count },
+      interestSaved: A.totalInterest - B.totalInterest,
+      paymentsSaved: A.count - B.count,
+      perLoan: loans.map((l, k) => ({
+        name: l.name,
+        interestWithout: without[k].totalInterest, interestWith: with_[k].totalInterest,
+        lastPaymentWithout: without[k].last, lastPaymentWith: with_[k].last
+      }))
+    }
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `interest-savings-${thisMonth()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+elId("load").addEventListener("click", () => elId("loadFile").click());
+
+elId("loadFile").addEventListener("change", ev => {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data || !Array.isArray(data.loans)) throw new Error('the file has no "loans" list.');
+      seq = 0;
+      const MODES = ["fixed-term", "fixed-payment", "fixed-term-balloon"];
+      state.termMode = MODES.includes(data.termMode) ? data.termMode : "fixed-term";
+      state.loans = data.loans.map(l => {
+        const loan = newLoan();
+        loan.name = l.name || loan.name;
+        loan.balance = l.balance ? fmt(l.balance) : "";
+        loan.bankRate = l.bankRate ? fmt(l.bankRate, 1, 4) : "";
+        loan.rate = l.rate ? fmt(l.rate, 1, 4) : "";
+        loan.bankPayment = l.bankPayment ? fmt(l.bankPayment) : "";
+        loan.rateModel = RATE_MODELS.some(m => m[0] === l.rateModel) ? l.rateModel : "aop-quarterly";
+        loan.lengthMode = l.lengthMode === "span" ? "span" : "dates";
+        loan.first = l.firstPayment || "";
+        loan.last = l.expectedLastPayment || "";
+        loan.years = l.termYears ? String(l.termYears) : "";
+        loan.monthsPart = l.termMonths ? String(l.termMonths) : "";
+        syncLength(loan);
+        loan.extra = l.extraPerMonth ? fmt(l.extraPerMonth) : "";
+        loan.lumps = (l.oneOffPayments || []).map(x => ({ month: x.month || "", amount: x.amount ? fmt(x.amount) : "" }));
+        return loan;
+      });
+      if (!state.loans.length) state.loans = [newLoan()];
+      elId("termMode").value = state.termMode;
+      renderInputs();
+      calc();
+    } catch (err) {
+      alert("Could not load the file: " + err.message);
+    }
+    elId("loadFile").value = "";
+  };
+  reader.readAsText(file);
+});
+
+renderInputs();
+calc();
+</script>
+</body>
+</html>
