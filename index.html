@@ -1,27 +1,567 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="da">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Loan Calculator</title>
-  <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: #f6f7f9;
-      color: #1a1a1a;
-    }
-    h1 {
-      font-size: 2.5rem;
-      font-weight: 600;
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loan Calculator</title>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --panel: #ffffff;
+    --ink: #1b1f24;
+    --muted: #5b6672;
+    --brand: #00617f;
+    --line: #dde3ea;
+    --head: #d9dff0;
+    --zebra: #fafbfc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem 1rem 4rem;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 2.25rem; font-weight: 600; margin: 0 0 1.5rem; }
+  h2 { font-size: 1rem; font-weight: 600; color: var(--brand); margin: 0 0 1rem; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.25rem 1.25rem 1.4rem;
+    margin-bottom: 1.5rem;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
+    gap: 1rem 1.5rem;
+    align-items: stretch;
+  }
+  /* Labels fylder 1 eller 2 linjer — felterne skubbes ned, så de flugter på tværs. */
+  .grid > div { display: flex; flex-direction: column; }
+  .grid > div > input,
+  .grid > div > select { margin-top: auto; }
+  label { display: block; font-size: .85rem; font-weight: 600; color: var(--brand); margin-bottom: .35rem; }
+  input, select {
+    width: 100%;
+    padding: .6rem .65rem;
+    font: inherit;
+    font-weight: 600;
+    border: 1px solid #b9c2cc;
+    border-radius: 4px;
+    background: #fff;
+    color: var(--ink);
+  }
+  input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .out .k { font-size: .85rem; font-weight: 600; color: var(--brand); margin-bottom: .35rem; }
+  .out .v { font-size: 1.05rem; }
+  .table-scroll { max-height: 520px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: .9rem; }
+  th, td { padding: .45rem .7rem; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  thead th {
+    position: sticky; top: 0; background: var(--head);
+    font-weight: 700; text-decoration: underline; text-align: left;
+  }
+  thead th.num { text-align: right; }
+  tbody td:nth-child(2) { text-align: left; }
+  tbody tr:nth-child(even) { background: var(--zebra); }
+  tfoot td { font-weight: 700; background: var(--head); border-bottom: none; position: sticky; bottom: 0; }
+  .note { font-size: .82rem; color: var(--muted); margin: .9rem 0 0; }
+  .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+  .panel-head h2 { margin-bottom: 1rem; }
+  .actions { display: flex; gap: .5rem; }
+  .actions button {
+    font: inherit; font-size: .9rem; font-weight: 600;
+    padding: .4rem .9rem; border-radius: 4px; cursor: pointer;
+    border: 1px solid var(--brand); background: #fff; color: var(--brand);
+  }
+  .actions button:hover { background: var(--brand); color: #fff; }
+  .actions button:disabled { border-color: #b9c2cc; color: #9aa4ae; cursor: default; background: #fff; }
+  #loadFile { display: none; }
+  .field-head { display: flex; align-items: center; justify-content: space-between; gap: .4rem; }
+  .field-head label { margin-bottom: .35rem; }
+  .lock {
+    border: none; background: none; cursor: pointer; padding: 0 0 .35rem;
+    font-size: .95rem; line-height: 1; opacity: .35; filter: grayscale(1);
+  }
+  .lock:hover { opacity: .7; }
+  .lock[aria-pressed="true"] { opacity: 1; filter: none; }
+  input.locked { background: #eef3f7; border-color: var(--brand); }
+</style>
 </head>
 <body>
+<div class="wrap">
   <h1>Loan Calculator</h1>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Lånets oplysninger</h2>
+      <div class="actions">
+        <button type="button" id="save">Save</button>
+        <button type="button" id="load">Load</button>
+        <input type="file" id="loadFile" accept="application/json,.json">
+      </div>
+    </div>
+    <div class="grid">
+      <div>
+        <label for="price">Købesum/Kontantpris</label>
+        <input id="price" type="text" inputmode="decimal" autocomplete="off">
+      </div>
+      <div>
+        <div class="field-head">
+          <label for="downPct">Udbetaling %</label>
+          <button type="button" class="lock" id="lock-downPct" aria-pressed="false"
+                  title="Lås feltet, så det ikke beregnes om">&#128275;</button>
+        </div>
+        <input id="downPct" type="text" inputmode="decimal" autocomplete="off">
+      </div>
+      <div>
+        <div class="field-head">
+          <label for="downAmt">Udbetaling</label>
+          <button type="button" class="lock" id="lock-downAmt" aria-pressed="false"
+                  title="Lås feltet, så det ikke beregnes om">&#128275;</button>
+        </div>
+        <input id="downAmt" type="text" inputmode="decimal" autocomplete="off">
+      </div>
+      <div>
+        <div class="field-head">
+          <label for="financed">Samlet finansieringsbeløb</label>
+          <button type="button" class="lock" id="lock-financed" aria-pressed="false"
+                  title="Lås feltet, så det ikke beregnes om">&#128275;</button>
+        </div>
+        <input id="financed" type="text" inputmode="decimal" autocomplete="off">
+      </div>
+      <div>
+        <label for="months">Løbetid (måneder)</label>
+        <input id="months" type="text" inputmode="decimal" autocomplete="off">
+      </div>
+      <div>
+        <label for="rateType">Rentetype</label>
+        <select id="rateType">
+          <option>Variabel</option>
+          <option>Fast</option>
+        </select>
+      </div>
+      <div>
+        <label for="rate">Rente (% p.a.)</label>
+        <input id="rate" type="text" inputmode="decimal" autocomplete="off">
+      </div>
+      <div>
+        <label for="loanType">Lånetype</label>
+        <select id="loanType">
+          <option value="annuitet">Annuitetslån</option>
+          <option value="serie">Serielån</option>
+          <option value="afdragsfri">Afdragsfrit</option>
+        </select>
+      </div>
+      <div>
+        <div class="field-head">
+          <label for="setupFee">Stiftelsesomkostninger</label>
+          <button type="button" class="lock" id="lock-setupFee" aria-pressed="false"
+                  title="Lås feltet, så det ikke beregnes om">&#128275;</button>
+        </div>
+        <input id="setupFee" type="text" inputmode="decimal" autocomplete="off">
+      </div>
+      <div>
+        <label for="quotedCost">Samlede kreditomkostninger (oplyst)</label>
+        <input id="quotedCost" type="text" inputmode="decimal" autocomplete="off">
+      </div>
+      <div>
+        <div class="field-head">
+          <label for="quoted">Månedlig ydelse (oplyst)</label>
+          <button type="button" class="lock" id="lock-quoted" aria-pressed="false"
+                  title="Lås feltet, så det ikke beregnes om">&#128275;</button>
+        </div>
+        <input id="quoted" type="text" inputmode="decimal" autocomplete="off">
+      </div>
+      <div>
+        <div class="field-head">
+          <label for="adminFee">Månedligt skjult gebyr</label>
+          <button type="button" class="lock" id="lock-adminFee" aria-pressed="false"
+                  title="Lås feltet, så det ikke beregnes om">&#128275;</button>
+        </div>
+        <input id="adminFee" type="text" inputmode="decimal" autocomplete="off">
+      </div>
+      <div>
+        <label for="start">Første betaling</label>
+        <input id="start" type="month">
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Resultat</h2>
+    <div class="grid out" id="summary"></div>
+    <p class="note" id="note"></p>
+  </section>
+
+  <section class="panel">
+    <h2>Betalingsplan</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th class="num">Måned</th>
+            <th>Dato</th>
+            <th class="num">gæld før</th>
+            <th class="num">ydelse</th>
+            <th class="num">rente</th>
+            <th class="num">afdrag</th>
+            <th class="num">gæld efter</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+        <tfoot id="tfoot"></tfoot>
+      </table>
+    </div>
+    <p class="note">
+      «Dato» er sidste dag i måneden. «ydelse» er afdrag + rente + månedligt skjult gebyr.
+    </p>
+  </section>
+</div>
+
+<script>
+// Tal vises efter dansk kultur: komma som decimaltegn, punktum som tusindtegn.
+// navigator.language er browserens *sprog* — ofte en-US på en dansk maskine — så
+// den bruges kun, hvis den faktisk peger på dansk. Andet format vælges med ?locale=en-US.
+const LOCALE = new URLSearchParams(location.search).get("locale")
+  || (navigator.languages || [navigator.language]).find(l => l && /^da\b|^da-/i.test(l))
+  || "da-DK";
+const kr = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = n => (n * 100).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " %";
+const el = id => document.getElementById(id);
+
+// Kultursens separatorer, aflæst af Intl frem for gættet.
+const parts = new Intl.NumberFormat(LOCALE).formatToParts(1234567.8);
+const GROUP = (parts.find(p => p.type === "group") || { value: "" }).value;
+const DECIMAL = (parts.find(p => p.type === "decimal") || { value: "." }).value;
+
+// Hvor mange decimaler det enkelte felt vises med.
+const DECIMALS = {
+  price: [2, 2], downAmt: [2, 2], financed: [2, 2], setupFee: [2, 2],
+  quoted: [2, 2], adminFee: [2, 2], quotedCost: [2, 2],
+  downPct: [0, 2], rate: [1, 4], months: [0, 0]
+};
+
+const fmtField = (id, n) => {
+  const [min, max] = DECIMALS[id] || [2, 2];
+  return n.toLocaleString(LOCALE, { minimumFractionDigits: min, maximumFractionDigits: max });
+};
+
+// Læser tal uanset om der er tastet komma eller punktum.
+function parseNum(raw) {
+  const s = String(raw).replace(/\s| /g, "");
+  if (!s) return 0;
+  const cut = Math.max(s.lastIndexOf("."), s.lastIndexOf(","));
+  if (cut === -1) return Number(s.replace(/[^\d-]/g, "")) || 0;
+  // "1.000" er tusinder, ikke en decimal, når separatoren er kulturens tusindtegn.
+  const tail = s.slice(cut + 1);
+  if (tail.length === 3 && s[cut] === GROUP && s.indexOf(s[cut]) === s.lastIndexOf(s[cut])
+      && s.indexOf(DECIMAL) === -1) {
+    return Number(s.replace(/[^\d-]/g, "")) || 0;
+  }
+  const whole = s.slice(0, cut).replace(/[^\d-]/g, "");
+  return Number(`${whole || "0"}.${tail.replace(/\D/g, "")}`) || 0;
+}
+
+const num = id => parseNum(el(id).value);
+
+const pad = n => String(n).padStart(2, "0");
+const daysIn = (y, m) => new Date(y, m + 1, 0).getDate();           // m: 0-based
+const dk = (y, m, d) => `${pad(Math.min(d, daysIn(y, m)))}.${pad(m + 1)}.${y}`;
+// Samme dato som dk(), men på ISO-form til den gemte fil.
+const iso = (y, m, d) => `${y}-${pad(m + 1)}-${pad(Math.min(d, daysIn(y, m)))}`;
+
+// Første betaling står på indeværende måned, indtil der vælges en anden.
+function thisMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+}
+
+function startMonth() {
+  const [y, m] = (el("start").value || thisMonth()).split("-").map(Number);
+  return { y, m: (m || 1) - 1 };
+}
+
+function schedule() {
+  const price = num("price");
+  const down = num("downAmt");
+  const credit = Math.max(price - down, 0);                          // kreditbeløb
+  const financed = Math.max(num("financed"), 0);                     // samlet finansieringsbeløb (kredit + omkostninger)
+  const n = Math.max(Math.round(num("months")), 1);
+  const i = num("rate") / 100 / 12;
+  const fee = num("adminFee");
+  const type = el("loanType").value;
+  const annuity = i === 0 ? financed / n : financed * i / (1 - Math.pow(1 + i, -n));
+  const { y, m } = startMonth();
+
+  const rows = [];
+  let balance = financed;
+  for (let k = 0; k < n; k++) {
+    const before = balance;
+    const interest = before * i;
+    let repay = type === "annuitet" ? annuity - interest
+              : type === "serie"    ? financed / n
+              : (k === n - 1 ? before : 0);
+    repay = Math.min(repay, before);
+    balance = before - repay;
+    if (k === n - 1 && balance > 0.005) { repay += balance; balance = 0; }
+
+    const mi = m + k;                                                // måneds-index fra start
+    const y1 = y + Math.floor(mi / 12), m1 = ((mi % 12) + 12) % 12;
+    rows.push({
+      m: k + 1,
+      date: dk(y1, m1, 31),                                          // sidste dag i måneden
+      dateISO: iso(y1, m1, 31),
+      before, payment: repay + interest + fee, interest, principal: repay, after: balance
+    });
+  }
+  return { rows, credit, financed, price, down, annuity, n };
+}
+
+// ÅOP: intern rente på de faktiske betalinger mod det udbetalte kreditbeløb, omregnet til år.
+function aop(payments, received) {
+  if (received <= 0) return 0;
+  const npv = r => payments.reduce((s, p, k) => s + p / Math.pow(1 + r, k + 1), 0) - received;
+  if (npv(0) <= 0) return 0;
+  let lo = 0, hi = 1;
+  while (npv(hi) > 0 && hi < 10) hi *= 2;
+  for (let k = 0; k < 200; k++) {
+    const mid = (lo + hi) / 2;
+    if (npv(mid) > 0) lo = mid; else hi = mid;
+  }
+  return Math.pow(1 + (lo + hi) / 2, 12) - 1;
+}
+
+function render() {
+  const s = schedule();
+  if (s.financed <= 0 || num("months") < 1) {                        // tom formular
+    el("summary").innerHTML = ["Månedlig ydelse", "Købesum/Kontantpris", "ÅOP",
+                               "Samlede renter", "Samlet tilbagebetaling", "Samlet omkostning"]
+      .map(k => "<div><div class=\"k\">" + k + "</div><div class=\"v\">–</div></div>").join("");
+    el("note").textContent = "Udfyld købesum, løbetid og rente — resten regner siden ud.";
+    el("tbody").innerHTML = "";
+    el("tfoot").innerHTML = "";
+    return;
+  }
+  const totals = s.rows.reduce((t, r) => ({
+    payment: t.payment + r.payment,
+    interest: t.interest + r.interest,
+    principal: t.principal + r.principal
+  }), { payment: 0, interest: 0, principal: 0 });
+
+  const monthly = s.rows[0].payment;
+  const pays = s.rows.map(r => r.payment);
+
+  // Oplyser banken kun de samlede kreditomkostninger, kan engangsomkostningen
+  // udledes: det er den del af prisen, der ikke ligger i de månedlige ydelser.
+  const quotedCost = num("quotedCost");
+  const oneOff = quotedCost ? quotedCost - (totals.payment - s.credit) : 0;
+
+  const tiles = [
+    ["Månedlig ydelse", kr.format(monthly) + " kr."],
+    ["Købesum/Kontantpris", kr.format(s.price) + " kr."],
+    ["ÅOP", pct(aop(pays, s.credit - oneOff))],
+    ["Samlede renter", kr.format(totals.interest) + " kr."],
+    ["Samlet tilbagebetaling", kr.format(totals.payment + oneOff) + " kr."],
+    // Kreditomkostninger: alt hvad lånet koster ud over det, du fik udbetalt.
+    ["Samlet omkostning", kr.format(totals.payment + oneOff - s.credit) + " kr."]
+  ];
+  if (quotedCost) {
+    tiles.push(["Afvigelses beløb", kr.format(oneOff) + " kr."]);
+  }
+  el("summary").innerHTML = tiles
+    .map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  el("note").textContent =
+    `Kreditbeløb ${kr.format(s.credit)} kr. + stiftelsesomkostninger ${kr.format(s.financed - s.credit)} kr. ` +
+    `= ${kr.format(s.financed)} kr. finansieret over ${s.n} måneder.`;
+
+  el("tbody").innerHTML = s.rows.map(r => `
+    <tr>
+      <td>${r.m}</td>
+      <td>${r.date}</td>
+      <td>${kr.format(r.before)}</td>
+      <td>${kr.format(r.payment)}</td>
+      <td>${kr.format(r.interest)}</td>
+      <td>${kr.format(r.principal)}</td>
+      <td>${kr.format(r.after)}</td>
+    </tr>`).join("");
+  el("tfoot").innerHTML = `
+    <tr>
+      <td colspan="3">I alt</td>
+      <td>${kr.format(totals.payment)}</td>
+      <td>${kr.format(totals.interest)}</td>
+      <td>${kr.format(totals.principal)}</td>
+      <td>${kr.format(0)}</td>
+    </tr>`;
+}
+
+// Kreditbeløbet: det du reelt låner, før omkostninger lægges oven i.
+const credit = () => Math.max(num("price") - num("downAmt"), 0);
+
+// Ydelse pr. krone finansieret — afhænger af lånetypen.
+function paymentFactor() {
+  const n = Math.max(Math.round(num("months")), 1);
+  const i = num("rate") / 100 / 12;
+  switch (el("loanType").value) {
+    case "serie":      return 1 / n + i;
+    case "afdragsfri": return i;
+    default:           return i === 0 ? 1 / n : i / (1 - Math.pow(1 + i, -n));
+  }
+}
+
+// Første ydelse uden gebyr.
+const basePayment = () => Math.max(num("financed"), 0) * paymentFactor();
+
+// ---- Låse ----------------------------------------------------------------
+// Et låst felt bliver aldrig regnet om; beregningen søger i stedet det næste
+// felt i prioriteringen. Låses gebyret, rammer en ændret ydelse altså
+// finansieringsbeløbet — og dermed stiftelsesomkostningerne.
+const LOCKABLE = ["downPct", "downAmt", "financed", "setupFee", "quoted", "adminFee"];
+const locked = id => el("lock-" + id).getAttribute("aria-pressed") === "true";
+const put = (id, n) => { if (!locked(id)) { el(id).value = fmtField(id, n); return true; } return false; };
+
+// Udbetaling: beløb og procent er to sider af samme tal.
+function syncDown(from) {
+  const p = num("price");
+  if (from === "downAmt") { if (p) put("downPct", num("downAmt") / p * 100); return; }
+  if (put("downAmt", p * num("downPct") / 100)) return;
+  if (p) put("downPct", num("downAmt") / p * 100);
+}
+
+// Finansieringsbeløb = kreditbeløb + stiftelsesomkostninger.
+function syncFinancing(from) {
+  if (from === "financed") { put("setupFee", num("financed") - credit()); return; }
+  if (put("financed", credit() + num("setupFee"))) return;
+  put("setupFee", num("financed") - credit());
+}
+
+// Ydelse = ren ydelse af finansieringsbeløbet + skjult gebyr.
+// prefer er rækkefølgen, beregningen prøver at lægge forskellen i.
+function syncPayment(prefer) {
+  for (const target of prefer) {
+    if (target === "quoted"   && put("quoted", basePayment() + num("adminFee"))) return;
+    if (target === "adminFee" && put("adminFee", num("quoted") - basePayment())) return;
+    if (target === "financed" && !locked("financed") && !locked("setupFee")) {
+      const factor = paymentFactor();
+      if (!(factor > 0)) continue;                                   // 0 % og afdragsfrit: intet at løse
+      const f = (num("quoted") - num("adminFee")) / factor;
+      if (!Number.isFinite(f)) continue;
+      put("financed", f);
+      put("setupFee", f - credit());
+      return;
+    }
+  }
+}
+
+el("price").addEventListener("input", () => {
+  syncDown("price"); syncFinancing("price"); syncPayment(["quoted", "adminFee", "financed"]); render();
+});
+["downPct", "downAmt"].forEach(f => el(f).addEventListener("input", () => {
+  syncDown(f); syncFinancing(f); syncPayment(["quoted", "adminFee", "financed"]); render();
+}));
+["financed", "setupFee"].forEach(f => el(f).addEventListener("input", () => {
+  syncFinancing(f); syncPayment(["quoted", "adminFee"]); render();
+}));
+
+// Oplyst ydelse ind → gebyret falder ud, med mindre gebyret er låst.
+el("quoted").addEventListener("input", () => { syncPayment(["adminFee", "financed"]); render(); });
+el("adminFee").addEventListener("input", () => { syncPayment(["quoted", "financed"]); render(); });
+
+// Ændres lånets vilkår, beregnes ydelsen forfra.
+["months", "rate", "loanType"].forEach(f =>
+  el(f).addEventListener("input", () => { syncPayment(["quoted", "adminFee", "financed"]); render(); }));
+
+["rateType", "start", "quotedCost"].forEach(f => el(f).addEventListener("input", render));
+
+function setLock(f, on) {
+  el("lock-" + f).setAttribute("aria-pressed", String(on));
+  el("lock-" + f).innerHTML = on ? "&#128274;" : "&#128275;";        // lukket/åben hængelås
+  el(f).classList.toggle("locked", on);
+}
+
+LOCKABLE.forEach(f => el("lock-" + f).addEventListener("click", () => setLock(f, !locked(f))));
+
+// ---- Gem og indlæs -------------------------------------------------------
+const INPUTS = ["price", "downPct", "downAmt", "financed", "months", "rateType",
+                "rate", "loanType", "setupFee", "quotedCost", "quoted", "adminFee", "start"];
+
+el("save").addEventListener("click", () => {
+  const s = schedule();
+  const paid = s.rows.reduce((t, r) => t + r.payment, 0);
+  const oneOff = num("quotedCost") ? num("quotedCost") - (paid - s.credit) : 0;
+  const data = {
+    format: "loan-calculator",
+    version: 1,
+    saved: new Date().toISOString(),
+    // Filen er kulturuafhængig: tal gemmes som tal, ikke som formateret tekst.
+    fields: Object.fromEntries(INPUTS.map(f =>
+      [f, f in DECIMALS ? num(f) : el(f).value])),
+    locks: Object.fromEntries(LOCKABLE.map(f => [f, locked(f)])),
+    // Resultatet gemmes med, så filen også kan læses uden siden.
+    result: {
+      monthlyPayment: s.rows[0] ? s.rows[0].payment : 0,
+      creditAmount: s.credit,
+      totalFinancedAmount: s.financed,
+      totalInterest: s.rows.reduce((t, r) => t + r.interest, 0),
+      totalRepaid: paid + oneOff,
+      totalCost: paid + oneOff - s.credit,
+      oneOffCost: oneOff,
+      schedule: s.rows.map(r => ({
+        month: r.m, date: r.dateISO, balanceBefore: r.before,
+        payment: r.payment, interest: r.interest, principal: r.principal, balanceAfter: r.after
+      }))
+    }
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `loan-calculation-${(el("start").value || thisMonth())}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+el("load").addEventListener("click", () => el("loadFile").click());
+
+el("loadFile").addEventListener("change", ev => {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      const fields = data && data.fields;
+      if (!fields) throw new Error("the file has no \"fields\" block.");
+      INPUTS.forEach(f => {
+        if (!(f in fields)) return;
+        el(f).value = f in DECIMALS ? fmtField(f, parseNum(fields[f])) : fields[f];
+      });
+      if (data.locks) LOCKABLE.forEach(f => setLock(f, !!data.locks[f]));
+      el("start").value = el("start").value || thisMonth();
+      render();
+    } catch (err) {
+      alert("Could not load the file: " + err.message);
+    }
+    el("loadFile").value = "";                                       // samme fil kan vælges igen
+  };
+  reader.readAsText(file);
+});
+
+// Ryd op i det tastede, når feltet forlades: 3.634,02 uanset hvordan det blev skrevet.
+Object.keys(DECIMALS).forEach(f =>
+  el(f).addEventListener("blur", () => {
+    if (el(f).value.trim()) el(f).value = fmtField(f, num(f));
+  }));
+
+el("start").value = el("start").value || thisMonth();
+el("downPct").value = el("downPct").value || fmtField("downPct", 10);
+el("rate").value    = el("rate").value    || fmtField("rate", 3);
+render();
+</script>
 </body>
 </html>
