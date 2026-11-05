@@ -230,6 +230,9 @@ function runPlan(loan, payment, opts = {}) {
   const i = monthlyRate(loan);
   const quarterly = loan.rateModel === "aop-quarterly";
   const lumps = opts.lumps || {};
+  // Ekstra ydelse betales kun i de første extraMonths måneder (standard: resten af lånet).
+  const extra = opts.extra || 0;
+  const extraMonths = opts.extraMonths == null ? Infinity : opts.extraMonths;
   const balloonAt = opts.balloonAt || 0;
   const limit = balloonAt || opts.limit || MAX_MONTHS;
   // Er udbetalingsdagen kendt, dækker første ydelse kun dagene derfra.
@@ -249,14 +252,15 @@ function runPlan(loan, payment, opts = {}) {
     const accrual = (m === 1 && firstDays !== null) ? before * dayRate(loan, firstDays) : before * i;
     const charge = quarterly ? (isQuarterEnd(date) ? accrued + accrual : 0) : accrual;
     const settle = before + accrued + accrual;                       // beløb til fuld indfrielse
+    const due = payment + (m <= extraMonths ? extra : 0);
     let pay, interest, principal;
-    if (settle <= payment + 0.01 || (balloonAt && m === balloonAt)) {
+    if (settle <= due + 0.01 || (balloonAt && m === balloonAt)) {
       pay = settle; interest = accrued + accrual; principal = before; accrued = 0;
     } else {
       // Uden udligning giver en ydelse under renten et lån, der aldrig afvikles.
       // Målt på den løbende månedsrente — en lang første periode er ikke i sig selv et stop.
-      if (!balloonAt && payment <= before * i) { stalled = true; break; }
-      pay = payment; interest = charge; principal = pay - charge;
+      if (!balloonAt && due <= before * i) { stalled = true; break; }
+      pay = due; interest = charge; principal = pay - charge;
       accrued = quarterly && !isQuarterEnd(date) ? accrued + accrual : 0;
     }
     const after = (before - principal <= 0.01) ? 0 : before - principal;
@@ -292,7 +296,7 @@ function simulate(loan, withExtra) {
   const regular = (balloon || state.termMode === "fixed-payment")
     ? loan.bankPayment : paymentForTerm(loan);
   const extra = withExtra ? loan.extra : 0;
-  const payment = regular + extra;
+  const payment = regular + extra;               // ydelsen i perioden med ekstra
 
   const lumps = {};
   if (withExtra) {
@@ -303,7 +307,9 @@ function simulate(loan, withExtra) {
     });
   }
 
-  const { rows, stalled } = runPlan(loan, payment, { lumps, balloonAt: balloon ? n : 0 });
+  const { rows, stalled } = runPlan(loan, regular, {
+    lumps, extra, extraMonths: loan.extraMonths, balloonAt: balloon ? n : 0
+  });
   const paying = rows.filter(r => r.payment > 0);
   return {
     rows, regular, payment, stalled,
@@ -338,7 +344,7 @@ const newLoan = () => ({
   id: ++seq, name: `Lån ${seq}`, balance: "", bankRate: "", rate: "",
   bankPayment: "", rateModel: "aop-quarterly", payout: "",
   first: "", last: "", lengthMode: "dates", years: "", monthsPart: "",
-  extra: "", lumps: []
+  extra: "", extraMonths: "", lumps: []
 });
 let state = { termMode: "fixed-term", loans: [newLoan()] };
 
@@ -349,6 +355,8 @@ function prepared() {
     balance: val(l, "balance"), rate: val(l, "rate"), bankPayment: val(l, "bankPayment"),
     rateModel: l.rateModel,
     first: l.first, lastExpected: l.last, payout: l.payout, extra: val(l, "extra"),
+    // Tomt felt = resten af lånet.
+    extraMonths: String(l.extraMonths || "").trim() ? Math.max(0, Math.round(val(l, "extraMonths"))) : null,
     lumps: l.lumps.map(x => ({ month: x.month, amount: parseNum(x.amount) })),
     n: (l.first && l.last) ? monthsBetween(l.first, l.last) : 0
   })).filter(l => l.balance > 0 && l.n >= 1 && (l.rate > 0 || l.bankPayment > 0));
@@ -495,13 +503,31 @@ function scenarioCard(l) {
           <input id="extra-${l.id}" type="text" inputmode="decimal" autocomplete="off"
                  data-id="${l.id}" data-field="extra" value="${esc(l.extra)}">
         </div>
+        <div>
+          <label for="extraMonths-${l.id}">Antal ydelser med ekstra</label>
+          <input id="extraMonths-${l.id}" type="text" inputmode="numeric" autocomplete="off"
+                 placeholder="Resten af lånet"
+                 data-id="${l.id}" data-field="extraMonths" value="${esc(l.extraMonths)}">
+        </div>
       </div>
+      <p class="derived" id="xm-${l.id}">${extraPeriodText(l)}</p>
       <div style="margin-top:1rem">
         <label>Engangsindbetalinger</label>
         ${lumps || '<p class="derived" style="margin:0 0 .6rem">Ingen endnu.</p>'}
         <button type="button" class="ghost" data-addlump="${l.id}">Tilføj engangsindbetaling</button>
       </div>
     </div>`;
+}
+
+// Hvornår den ekstra ydelse ophører, til visning under scenariekortet.
+function extraPeriodText(l) {
+  if (!parseNum(l.extra)) return "";
+  if (!String(l.extraMonths || "").trim()) return "Ekstra ydelse betales resten af lånet.";
+  const k = Math.max(0, Math.round(parseNum(l.extraMonths)));
+  if (!k) return "Ingen ekstra ydelse (0 ydelser).";
+  if (!l.first) return `Ekstra ydelse i de første ${fmt(k, 0, 0)} ydelser.`;
+  return `Ekstra ydelse i ${fmt(k, 0, 0)} ydelser: ${dk(l.first)} – ${dk(edate(l.first, k - 1))}` +
+         " (eller til lånet er indfriet).";
 }
 
 const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -583,12 +609,12 @@ function calc() {
           <div class="plan scroll">
             <table>
               <thead><tr><th>Måned</th><th>Dato</th><th>Engangs</th><th>Gæld før</th>
-                <th>Ydelse</th><th>Rente</th><th>Afdrag</th><th>Gæld efter</th></tr></thead>
-              <tbody>${b.rows.map(r => `<tr>
+                <th>Ydelse</th><th>Rente</th><th>Rente i alt</th><th>Afdrag</th><th>Gæld efter</th></tr></thead>
+              <tbody>${(() => { let run = 0; return b.rows.map(r => { run += r.interest; return `<tr>
                 <td>${r.m}</td><td>${dk(r.date)}</td><td>${r.lump ? money(r.lump) : ""}</td>
                 <td>${money(r.before)}</td><td>${money(r.payment)}</td>
-                <td>${money(r.interest)}</td><td>${money(r.principal)}</td><td>${money(r.after)}</td>
-              </tr>`).join("")}</tbody>
+                <td>${money(r.interest)}</td><td>${money(run)}</td><td>${money(r.principal)}</td><td>${money(r.after)}</td>
+              </tr>`; }).join(""); })()}</tbody>
             </table>
           </div>
         </details>
@@ -637,6 +663,10 @@ document.addEventListener("input", ev => {
     syncLength(loan);
     writeLength(loan);
   }
+  if (["extra", "extraMonths", "first", "last", "years", "monthsPart"].includes(field)) {
+    const xm = elId(`xm-${loan.id}`);
+    if (xm) xm.textContent = extraPeriodText(loan);
+  }
   if (t.dataset.field === "name") {
     const h = elId("scenarios").querySelectorAll("h3")[state.loans.indexOf(loan)];
     if (h) h.textContent = t.value || `Lån ${loan.id}`;
@@ -651,7 +681,7 @@ document.addEventListener("focusout", ev => {
   const f = t.dataset.field;
   if (["name", "lengthMode", "rateModel"].includes(f) || !t.value.trim()) return;
   const decimals = (f === "rate" || f === "bankRate") ? [1, 4]
-                 : (f === "years" || f === "monthsPart") ? [0, 0] : [2, 2];
+                 : (f === "years" || f === "monthsPart" || f === "extraMonths") ? [0, 0] : [2, 2];
   t.value = fmt(parseNum(t.value), decimals[0], decimals[1]);
   const loan = findLoan(t.dataset.id);
   if (!loan) return;
@@ -701,6 +731,8 @@ elId("save").addEventListener("click", () => {
       termYears: Math.round(parseNum(l.years)),
       termMonths: Math.round(parseNum(l.monthsPart)),
       extraPerMonth: parseNum(l.extra),
+      // null = resten af lånet.
+      extraPayments: String(l.extraMonths || "").trim() ? Math.max(0, Math.round(parseNum(l.extraMonths))) : null,
       oneOffPayments: l.lumps.map(x => ({ month: x.month || null, amount: parseNum(x.amount) }))
     })),
     result: {
@@ -759,6 +791,7 @@ elId("loadFile").addEventListener("change", ev => {
         loan.monthsPart = l.termMonths ? String(l.termMonths) : "";
         syncLength(loan);
         loan.extra = l.extraPerMonth ? fmt(l.extraPerMonth) : "";
+        loan.extraMonths = Number.isFinite(l.extraPayments) ? String(l.extraPayments) : "";
         loan.lumps = (l.oneOffPayments || []).map(x => ({ month: x.month || "", amount: x.amount ? fmt(x.amount) : "" }));
         return loan;
       });
