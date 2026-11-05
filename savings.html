@@ -72,6 +72,13 @@
   tbody tr:nth-child(even) { background: var(--zebra); }
   tr.strong td { font-weight: 700; }
   td.gain { color: var(--good); font-weight: 600; }
+  /* Hovedtal: pr.-lån-linjer indrykket under hvert samlet nøgletal. */
+  #totals tr { background: none; }
+  #totals tr.main + tr.sub td { border-top: 0; }
+  #totals tr.sub td { font-size: .82rem; color: var(--muted); font-weight: 400; padding-top: .25rem; padding-bottom: .25rem; border-bottom-color: transparent; }
+  #totals tr.sub td:first-child { padding-left: 1.8rem; }
+  #totals tr.sub td.gain { color: var(--good); }
+  #totals tr.main { background: var(--zebra); }
   .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
   .save-box {
     background: var(--goodbg); border: 1px solid #bfe3cf; border-radius: 10px;
@@ -128,7 +135,7 @@
   </section>
 
   <section class="panel">
-    <h2>3. Hovedtal &mdash; samlet for alle lån</h2>
+    <h2>3. Hovedtal &mdash; samlet for alle lån og pr. lån</h2>
     <div class="scroll">
       <table>
         <thead>
@@ -665,8 +672,8 @@ function calc() {
   const years = last => last ? days(edate(anchor, 0), last) / 365.25 : 0;
   const stalled = with_.some(r => r.stalled) || without.some(r => r.stalled);
 
-  const row = (label, a, b, d, strong) => `
-    <tr class="${strong ? "strong" : ""}">
+  const row = (label, a, b, d, strong, cls = "") => `
+    <tr class="${strong ? "strong" : ""} ${cls}">
       <td>${label}</td><td>${a}</td><td>${b}</td>
       <td class="${d && d.gain ? "gain" : ""}">${d ? d.text : ""}</td>
     </tr>`;
@@ -675,23 +682,33 @@ function calc() {
     return { text: (d > 0 ? "+" : "") + f(d), gain: better === "less" ? d < -0.005 : d > 0.005 };
   };
 
-  tb.innerHTML = [
-    row("Månedlig ydelse (DKK pr. md)", money(A.payment), money(B.payment), diff(A.payment, B.payment, money, "more")),
-    row("Rente i første ydelse (DKK)", money(A.firstInterest), money(B.firstInterest), diff(A.firstInterest, B.firstInterest)),
-    row("Rente i første år (DKK)", money(A.yearOne), money(B.yearOne), diff(A.yearOne, B.yearOne)),
-    row("TOTAL RENTE I HELE LÅNET (DKK)", money(A.totalInterest), money(B.totalInterest),
-        diff(A.totalInterest, B.totalInterest), true),
-    row("Afdrag / hovedstol (DKK)", money(A.principal), money(B.principal), diff(A.principal, B.principal, money, "more")),
-    row("I ALT BETALT (DKK)", money(A.totalInterest + A.principal), money(B.totalInterest + B.principal),
-        diff(A.totalInterest + A.principal, B.totalInterest + B.principal), true),
-    row("Sidste ydelse (dato)", A.last ? dk(A.last) : "–", B.last ? dk(B.last) : "–",
-        { text: A.last && B.last ? fmt(days(B.last, A.last) / 365.25, 1, 1) + " år tidligere" : "", gain: true }),
-    row("Sidste ydelse (beløb)", money(A.lastPayment), money(B.lastPayment),
-        diff(A.lastPayment, B.lastPayment)),
-    row("Antal ydelser (antal)", fmt(A.count, 0, 0), fmt(B.count, 0, 0), diff(A.count, B.count, n => fmt(n, 0, 0))),
-    row("Løbetid tilbage (år)", fmt(years(A.last), 1, 1), fmt(years(B.last), 1, 1),
-        diff(years(A.last), years(B.last), n => fmt(n, 1, 1)))
-  ].join("");
+  // Hvert nøgletal: samlet for alle lån og — ved flere lån — pr. lån lige nedenunder.
+  const metrics = (A, B, years) => [
+    ["Månedlig ydelse (DKK pr. md)", money(A.payment), money(B.payment), diff(A.payment, B.payment, money, "more")],
+    ["Rente i første ydelse (DKK)", money(A.firstInterest), money(B.firstInterest), diff(A.firstInterest, B.firstInterest)],
+    ["Rente i første år (DKK)", money(A.yearOne), money(B.yearOne), diff(A.yearOne, B.yearOne)],
+    ["TOTAL RENTE I HELE LÅNET (DKK)", money(A.totalInterest), money(B.totalInterest),
+        diff(A.totalInterest, B.totalInterest), true],
+    ["Afdrag / hovedstol (DKK)", money(A.principal), money(B.principal), diff(A.principal, B.principal, money, "more")],
+    ["I ALT BETALT (DKK)", money(A.totalInterest + A.principal), money(B.totalInterest + B.principal),
+        diff(A.totalInterest + A.principal, B.totalInterest + B.principal), true],
+    ["Sidste ydelse (dato)", A.last ? dk(A.last) : "–", B.last ? dk(B.last) : "–",
+        { text: A.last && B.last ? fmt(days(B.last, A.last) / 365.25, 1, 1) + " år tidligere" : "", gain: true }],
+    ["Sidste ydelse (beløb)", money(A.lastPayment), money(B.lastPayment),
+        diff(A.lastPayment, B.lastPayment)],
+    ["Antal ydelser (antal)", fmt(A.count, 0, 0), fmt(B.count, 0, 0), diff(A.count, B.count, n => fmt(n, 0, 0))],
+    ["Løbetid tilbage (år)", fmt(years(A.last), 1, 1), fmt(years(B.last), 1, 1),
+        diff(years(A.last), years(B.last), n => fmt(n, 1, 1))]
+  ];
+  const total = metrics(A, B, years);
+  const each = loans.length > 1 ? loans.map((l, k) => {
+    const yrs = last => last && l.first ? days(edate(l.first, 0), last) / 365.25 : 0;
+    return metrics(aggregate([without[k]], [l]), aggregate([with_[k]], [l]), yrs);
+  }) : [];
+  tb.innerHTML = total.map(([label, a, b, d, strong], i) =>
+    row(label, a, b, d, strong, "main") +
+    each.map((m, k) => row(esc(loans[k].name), m[i][1], m[i][2], m[i][3], false, "sub")).join("")
+  ).join("");
 
   const lumpTotal = with_.reduce((t, r) => t + r.totalLump, 0);
   elId("totalsNote").textContent =
