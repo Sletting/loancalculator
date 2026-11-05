@@ -93,8 +93,9 @@
   <h1>Interest Savings</h1>
   <p class="sub">
     Ydelse, renter og tid til afvikling for et eller flere lån &mdash; og hvad ekstra
-    indbetalinger sparer. Annuitetslån; renten løber månedligt og tilskrives efter den
-    rentemodel, der er valgt på det enkelte lån.
+    indbetalinger sparer. Annuitetslån; renten beregnes efter den rentemodel, der er valgt
+    på det enkelte lån. Bankens metode: nominel rente / 365 pr. dag af den daglige saldo,
+    tilskrevet sidste bankdag i hvert kvartal, med ydelser på deres bogføringsdag.
     &nbsp;<a href="index.html">&larr; Loan Calculator</a>
   </p>
 
@@ -211,7 +212,8 @@ const pmt = (i, n, pv) => i === 0 ? pv / n : pv * i / (1 - Math.pow(1 + i, -n));
 function monthlyRate(loan) {
   const r = loan.rate / 100;
   if (r <= 0) return 0;
-  return loan.rateModel === "nominal-monthly" ? r / 12 : Math.pow(1 + r, 1 / 12) - 1;
+  return (loan.rateModel === "nominal-monthly" || loan.rateModel === "bank-daily")
+    ? r / 12 : Math.pow(1 + r, 1 / 12) - 1;
 }
 // Renten for en brudt periode: fra udbetalingsdagen frem til første ydelse.
 function dayRate(loan, d) {
@@ -223,10 +225,112 @@ function dayRate(loan, d) {
 // Tilskrives kvartalsvis: ultimo marts, juni, september og december.
 const isQuarterEnd = iso => [2, 5, 8, 11].includes(parseDate(iso).m);
 
+// ---- Bankdage ------------------------------------------------------------
+const addDays = (iso, k) => {
+  const o = parseDate(iso);
+  return new Date(Date.UTC(o.y, o.m, o.d + k)).toISOString().slice(0, 10);
+};
+function easter(y) {                                   // gregoriansk påskedag
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mo = Math.floor((h + l - 7 * m + 114) / 31), da = ((h + l - 7 * m + 114) % 31) + 1;
+  return `${y}-${pad(mo)}-${pad(da)}`;
+}
+// Danske bankhelligdage (inkl. fredag efter Kr. himmelfart, grundlovsdag, 24. og 31. dec.).
+const HOLIDAYS = {};
+function holidays(y) {
+  if (HOLIDAYS[y]) return HOLIDAYS[y];
+  const e = easter(y);
+  const rel = [-3, -2, 1, 39, 40, 50].concat(y <= 2023 ? [26] : []);   // store bededag t.o.m. 2023
+  HOLIDAYS[y] = new Set(rel.map(k => addDays(e, k))
+    .concat(["01-01", "06-05", "12-24", "12-25", "12-26", "12-31"].map(s => `${y}-${s}`)));
+  return HOLIDAYS[y];
+}
+const isBankDay = iso => {
+  const wd = new Date(Date.parse(iso)).getUTCDay();
+  return wd !== 0 && wd !== 6 && !holidays(parseDate(iso).y).has(iso);
+};
+// Falder datoen ikke på en bankdag, bogføres den på bankdagen før.
+function bankDay(iso) { let d = iso; while (!isBankDay(d)) d = addDays(d, -1); return d; }
+const lastBankDayOfMonth = iso => bankDay(lastDayOfMonth(iso));
+
+// Bankens metode: simpel dagsrente (nominel rente / 365) af den daglige saldo.
+// Renteperioden går fra dagen efter forrige tilskrivning til og med tilskrivningsdagen,
+// som er sidste bankdag i marts, juni, september og december. Ydelser og
+// tilskrivninger regnes på deres bogføringsdag.
+function runBankPlan(loan, payment, opts = {}) {
+  const daily = loan.rate / 100 / 365;
+  const lumps = opts.lumps || {};
+  const extra = opts.extra || 0;
+  const extraMonths = opts.extraMonths == null ? Infinity : opts.extraMonths;
+  const balloonAt = opts.balloonAt || 0;
+  const limit = balloonAt || opts.limit || MAX_MONTHS;
+
+  // Ligger første ydelse ultimo måneden (sidste kalender- eller bankdag), følger
+  // alle ydelser månedens sidste bankdag; ellers samme dag i måneden.
+  const monthEnd = loan.first === lastDayOfMonth(loan.first) || loan.first === lastBankDayOfMonth(loan.first);
+  const payDate = m => monthEnd ? lastBankDayOfMonth(edate(loan.first, m - 1)) : bankDay(edate(loan.first, m - 1));
+
+  // Tilskrivningsdage i perioden (from, to].
+  const postingsBetween = (from, to) => {
+    const out = [];
+    for (let k = 0; ; k++) {
+      const mon = edate(from.slice(0, 8) + "01", k);
+      if (mon > to) break;
+      if (isQuarterEnd(mon)) {
+        const p = lastBankDayOfMonth(mon);
+        if (p > from && p <= to) out.push(p);
+      }
+    }
+    return out;
+  };
+
+  const rows = [];
+  let balance = loan.balance, posted = 0, unposted = 0, stalled = false, settled = false;
+  let prev = loan.payout || payDate(0);
+  for (let m = 1; m <= limit; m++) {
+    const lump = Math.min(lumps[m] || 0, balance);
+    const before = balance - lump;
+    const date = payDate(m);
+    if (before <= 0.01 && posted + unposted <= 0.01) {
+      if (lump) rows.push({ m, date, lump, before: 0, payment: 0, interest: 0, principal: 0, after: 0 });
+      settled = true;
+      break;
+    }
+    // Dag for dag til ydelsesdagen; tilskrevne renter forrentes fra tilskrivningsdagen.
+    let cursor = prev;
+    for (const p of postingsBetween(prev, date)) {
+      unposted += (before + posted) * daily * days(cursor, p);
+      posted += unposted; unposted = 0; cursor = p;
+    }
+    unposted += (before + posted) * daily * days(cursor, date);
+    if (isQuarterEnd(date) && date === lastBankDayOfMonth(date)) { posted += unposted; unposted = 0; }
+
+    const due = payment + (m <= extraMonths ? extra : 0);
+    const settle = before + posted + unposted;                     // beløb til fuld indfrielse
+    let pay, interest, principal;
+    if (settle <= due + 0.01 || (balloonAt && m === balloonAt)) {
+      pay = settle; interest = posted + unposted; principal = before; posted = 0; unposted = 0;
+    } else {
+      if (!balloonAt && due <= before * loan.rate / 100 / 12) { stalled = true; break; }
+      pay = due; interest = posted; principal = due - posted; posted = 0;
+    }
+    const after = (before - principal <= 0.01) ? 0 : before - principal;
+    rows.push({ m, date, lump, before, payment: pay, interest, principal, after });
+    balance = after;
+    prev = date;
+    if (balance === 0 && posted + unposted <= 0.01) { settled = true; break; }
+  }
+  return { rows, stalled, settled };
+}
+
 // Kernen: afvikling måned for måned ved en given ydelse.
 // Renten løber hver måned, men debiteres først ved tilskrivningen; indtil da
 // afdrager hele ydelsen på gælden, og de påløbne renter venter i "accrued".
 function runPlan(loan, payment, opts = {}) {
+  if (loan.rateModel === "bank-daily") return runBankPlan(loan, payment, opts);
   const i = monthlyRate(loan);
   const quarterly = loan.rateModel === "aop-quarterly";
   const lumps = opts.lumps || {};
@@ -277,7 +381,8 @@ function paymentForTerm(loan) {
   const n = Math.max(loan.n, 1);
   const i = monthlyRate(loan);
   // Annuitetsformlen gælder kun ved månedlig tilskrivning og hele perioder.
-  if (loan.rateModel !== "aop-quarterly" && !loan.payout) return pmt(i, n, loan.balance);
+  if ((loan.rateModel === "aop-monthly" || loan.rateModel === "nominal-monthly") && !loan.payout)
+    return pmt(i, n, loan.balance);
   let lo = 0, hi = loan.balance * (1 + i) ;
   for (let k = 0; k < 60; k++) {
     const mid = (lo + hi) / 2;
@@ -342,7 +447,7 @@ function aggregate(results, loans) {
 let seq = 0;
 const newLoan = () => ({
   id: ++seq, name: `Lån ${seq}`, balance: "", bankRate: "", rate: "",
-  bankPayment: "", rateModel: "aop-quarterly", payout: "",
+  bankPayment: "", rateModel: "bank-daily", payout: "",
   first: "", last: "", lengthMode: "dates", years: "", monthsPart: "",
   extra: "", extraMonths: "", lumps: []
 });
@@ -352,7 +457,10 @@ const val = (loan, f) => parseNum(loan[f]);
 function prepared() {
   return state.loans.map(l => ({
     id: l.id, name: l.name || `Lån ${l.id}`,
-    balance: val(l, "balance"), rate: val(l, "rate"), bankPayment: val(l, "bankPayment"),
+    balance: val(l, "balance"),
+    // Bankens metode regner med den nominelle rente; ÅOP indeholder også gebyrer.
+    rate: l.rateModel === "bank-daily" ? (val(l, "bankRate") || val(l, "rate")) : val(l, "rate"),
+    bankPayment: val(l, "bankPayment"),
     rateModel: l.rateModel,
     first: l.first, lastExpected: l.last, payout: l.payout, extra: val(l, "extra"),
     // Tomt felt = resten af lånet.
@@ -365,13 +473,14 @@ function prepared() {
 // ---- Felter --------------------------------------------------------------
 const FIELDS = [
   ["balance", "Restgæld (DKK)", "num"],
-  ["bankRate", "Rente ifølge banken (%)", "num"],
-  ["rate", "ÅOP / rente i modellen (%)", "num"],
+  ["bankRate", "Rente (%)", "num"],
+  ["rate", "ÅOP (%) – bruges kun af ÅOP-modellerne", "num"],
   ["rateModel", "Rentemodel", "select"],
   ["bankPayment", "Ydelse ifølge banken (DKK/md)", "num"]
 ];
 
 const RATE_MODELS = [
+  ["bank-daily", "Nominel dagsrente – tilskrives kvartalsvis (bankens metode)"],
   ["aop-quarterly", "ÅOP – tilskrives kvartalsvis"],
   ["aop-monthly", "ÅOP – tilskrives månedligt"],
   ["nominal-monthly", "Nominel rente ÷ 12"]
@@ -782,7 +891,7 @@ elId("loadFile").addEventListener("change", ev => {
         loan.bankRate = l.bankRate ? fmt(l.bankRate, 1, 4) : "";
         loan.rate = l.rate ? fmt(l.rate, 1, 4) : "";
         loan.bankPayment = l.bankPayment ? fmt(l.bankPayment) : "";
-        loan.rateModel = RATE_MODELS.some(m => m[0] === l.rateModel) ? l.rateModel : "aop-quarterly";
+        loan.rateModel = RATE_MODELS.some(m => m[0] === l.rateModel) ? l.rateModel : "bank-daily";
         loan.lengthMode = l.lengthMode === "span" ? "span" : "dates";
         loan.payout = l.payoutDate || "";
         loan.first = l.firstPayment || "";
